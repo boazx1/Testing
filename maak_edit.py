@@ -149,21 +149,32 @@ def ondertitel_filters(bron, start, lengte, traag, uit):
     return "," + ",".join(filters) if filters else ""
 
 
+# Plek van Pangi's webcam in zijn stream (deel van breedte/hoogte): x, y, b, h
+WEBCAM = (0.0, 0.3528, 0.2052, 0.2537)
+
+
 def segment(bron, start, lengte, uit, zw=False, traag=1.0, zoom=0.0, flits=False,
-            fade_in=0.0, fade_out=0.0, volume=0.0, audio_bron=None):
+            fade_in=0.0, fade_out=0.0, volume=0.0, audio_bron=None, cam=False):
     """Knipt een stuk uit een clip: verticaal met wazige achtergrond.
     Het originele geluid komt (op `volume`) in een losse .wav naast het stuk;
-    `audio_bron` vervangt het geluid, bijv. alleen de stem."""
+    `audio_bron` vervangt het geluid, bijv. alleen de stem.
+    `cam`: alleen Pangi's webcam groot in beeld (de game wazig erachter)."""
     kleur = ",hue=s=0,eq=contrast=1.12:brightness=-0.03" if zw else ",eq=saturation=1.15:contrast=1.05"
     # langzame zoom-in over de hele lengte van het stuk
     z = f"(1+{zoom}*t/{lengte:.3f})"
-    # met eigen ondertitels: onderste 12% (ingebakken ondertitels + hotbar) wegsnijden
-    eigen_tekst = bron.with_name(bron.stem + ".srt").exists()
-    hoogte = int(W * 9 / 16 * (0.88 if eigen_tekst else 1)) // 2 * 2
-    bijsnijden = f",crop=iw:trunc(ih*0.88/2)*2:0:0" if eigen_tekst else ""
-    fg = (f"scale={W}:-2,setsar=1{bijsnijden},scale=w='trunc({W}*{z}/2)*2':h=-2:eval=frame,"
+    # bijsnijden vóór het schalen: bij "cam" alleen de webcam, met eigen ondertitels de
+    # onderste 12% (ingebakken ondertitels + hotbar)
+    voor, hoogte = "", int(W * 9 / 16) // 2 * 2
+    if cam:
+        cx, cy, cb, ch = WEBCAM
+        voor = f"crop=trunc(iw*{cb}/2)*2:trunc(ih*{ch}/2)*2:iw*{cx}:ih*{cy},"
+        hoogte = int(W * (ch * 9) / (cb * 16)) // 2 * 2
+    elif bron.with_name(bron.stem + ".srt").exists():
+        voor = "crop=iw:trunc(ih*0.88/2)*2:0:0,"
+        hoogte = int(W * 9 / 16 * 0.88) // 2 * 2
+    fg = (f"{voor}scale={W}:-2,setsar=1,scale=w='trunc({W}*{z}/2)*2':h=-2:eval=frame,"
           f"crop=w={W}:h='min(ih,{hoogte})':x='(iw-ow)/2':y='(ih-oh)/2'{kleur}")
-    bg = f"{bijsnijden[1:] + ',' if bijsnijden else ''}scale=-2:{H},crop={W}:{H},boxblur=25:2{kleur},eq=brightness=-0.15"
+    bg = f"{'' if cam else voor}scale=-2:{H},crop={W}:{H},boxblur=25:2{kleur},eq=brightness=-0.15"
     vf = (f"[0:v]setpts={1 / traag}*(PTS-STARTPTS),fps={FPS},split[a][b];[a]{bg}[bg];[b]{fg}[fg];"
           f"[bg][fg]overlay=(W-w)/2:(H-h)/2,vignette=PI/5")
     vf += ondertitel_filters(bron, start, lengte, traag, uit)
@@ -198,6 +209,8 @@ def main():
     ap.add_argument("--bpm", type=float, help="tempo als er geen liedje in muziek/ staat")
     ap.add_argument("--eindtekst", default="rust zacht Pangi", help='"" = geen tekst')
     ap.add_argument("--eindduur", type=float, default=4.0, help="lengte van het eindscherm (s)")
+    ap.add_argument("--eind-tot", type=float, dest="eind_tot",
+                    help="tijd (s) in het liedje waarop het eindscherm moet ophouden (met --piek)")
     ap.add_argument("--uitfaden", type=float, default=4.0,
                     help="hoe lang het liedje aan het eind wegvloeit (s)")
     ap.add_argument("--eindvolume", type=float, default=1.0,
@@ -229,10 +242,10 @@ def main():
     muziek_vol = []  # volume van het liedje per stuk (zachter als er clipgeluid is)
     dood_moment = None
 
-    def nieuw(lied=1.0):
+    def nieuw(lied=1.0, overgang=0.3):
         p = TMP / f"{len(stukken) + 1:03d}.mp4"
         stukken.append(p)
-        muziek_vol.append(lied)
+        muziek_vol.append((lied, overgang))
         return p
 
     leuk_lied = 0.45 if args.clipgeluid > 0 else 1.0
@@ -240,7 +253,7 @@ def main():
     # Leuke clips: kort en snel, max 2 stukken per clip, wit flitsje op elke knip.
     # "naam@23-30.5.mp4" = precies dat stuk (lengte afgerond op de beat).
     # "_luid" in de naam = eigen geluid harder en liedje zachter (voor een moment dat je moet horen),
-    # "_stil" = zonder eigen geluid, alleen het liedje (vol).
+    # "_stil" = zonder eigen geluid, alleen het liedje (vol). "_cam" = webcam groot in beeld.
     for n, clip in enumerate(leuk):
         d = duur(clip)
         tijden = tijden_uit(clip)
@@ -256,7 +269,7 @@ def main():
             lengte = max(tik, math.ceil((eind - begin) / tik - 0.01) * tik)
             begin = max(0.0, eind - lengte)
             segment(clip, begin, min(lengte, d - begin), nieuw(lied_vol), zoom=0.08, flits=True,
-                    volume=clip_vol)
+                    volume=clip_vol, cam="_cam" in clip.stem)
             continue
         lengte = tik * (4 if n % 3 == 0 else 2)
         while lengte > d and lengte > tik:
@@ -292,14 +305,19 @@ def main():
         stem = clip.with_name(clip.stem + ".stem.wav")
         geluid = stem if stem.exists() else clip if "_geluid" in clip.stem else None
         if geluid:
-            segment(clip, begin, eind - begin, nieuw(0.25), zw=True, zoom=0.06, fade_in=0.4,
+            segment(clip, begin, eind - begin, nieuw(0.25, 1.0), zw=True, zoom=0.06, fade_in=0.4,
                     fade_out=0.8, volume=spraak_volume(geluid, begin, eind - begin),
                     audio_bron=geluid)
         else:
             segment(clip, begin, eind - begin, nieuw(), zw=True, zoom=0.06, fade_in=0.4,
                     fade_out=0.8)
 
-    einde(args.eindtekst, args.eindduur if args.eindtekst else 2.0, nieuw(args.eindvolume))
+    eindduur = args.eindduur if args.eindtekst else 2.0
+    if args.eind_tot and liedje and args.piek is not None and dood_moment is not None:
+        lied_nu = args.piek - dood_moment + sum(duur(x) for x in stukken)
+        eindduur = min(10.0, max(3.0, args.eind_tot - lied_nu))
+        print(f"Eindscherm begint op {lied_nu:.1f}s in het liedje en duurt {eindduur:.1f}s")
+    einde(args.eindtekst, eindduur, nieuw(args.eindvolume, 1.0))
 
     lijst = TMP / "lijst.txt"
     lijst.write_text("".join(f"file '{s.name}'\n" for s in stukken))
@@ -311,12 +329,12 @@ def main():
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lijst_wav), "-c", "copy",
          str(clipgeluid)])
 
-    # volume van het liedje per stuk, met zachte overgangen van 0.3 s
+    # volume van het liedje per stuk, met zachte overgangen (meestal 0.3 s)
     t, vol_expr = 0.0, "1"
-    for s, v in zip(stukken, muziek_vol):
+    for s, (v, overgang) in zip(stukken, muziek_vol):
         d = duur(s)
         if v != 1.0:
-            ramp = f"min(1,min(t-{t:.3f},{t + d:.3f}-t)/0.3)"
+            ramp = f"min(1,min(t-{t:.3f},{t + d:.3f}-t)/{overgang})"
             vol_expr = f"if(between(t,{t:.3f},{t + d:.3f}),1-(1-{v})*{ramp},{vol_expr})"
         t += d
 
