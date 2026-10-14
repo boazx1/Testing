@@ -197,6 +197,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bpm", type=float, help="tempo als er geen liedje in muziek/ staat")
     ap.add_argument("--eindtekst", default="rust zacht Pangi", help='"" = geen tekst')
+    ap.add_argument("--eindduur", type=float, default=4.0, help="lengte van het eindscherm (s)")
+    ap.add_argument("--uitfaden", type=float, default=4.0,
+                    help="hoe lang het liedje aan het eind wegvloeit (s)")
+    ap.add_argument("--eindvolume", type=float, default=1.0,
+                    help="volume van het liedje tijdens het eindscherm")
     ap.add_argument("--clipgeluid", type=float, default=0.8,
                     help="volume van het originele geluid bij leuke clips (0 = uit)")
     ap.add_argument("--piek", type=float,
@@ -234,12 +239,17 @@ def main():
 
     # Leuke clips: kort en snel, max 2 stukken per clip, wit flitsje op elke knip.
     # "naam@23-30.5.mp4" = precies dat stuk (lengte afgerond op de beat).
-    # "_luid" in de naam = eigen geluid harder en liedje zachter (voor een moment dat je moet horen).
+    # "_luid" in de naam = eigen geluid harder en liedje zachter (voor een moment dat je moet horen),
+    # "_stil" = zonder eigen geluid, alleen het liedje (vol).
     for n, clip in enumerate(leuk):
         d = duur(clip)
         tijden = tijden_uit(clip)
-        luid = "_luid" in clip.stem
-        lied_vol, clip_vol = (0.2, args.clipgeluid * 1.1) if luid else (leuk_lied, args.clipgeluid)
+        if "_luid" in clip.stem:
+            lied_vol, clip_vol = 0.2, args.clipgeluid * 1.1
+        elif "_stil" in clip.stem:  # zonder eigen geluid, liedje op vol volume
+            lied_vol, clip_vol = 1.0, 0.0
+        else:
+            lied_vol, clip_vol = leuk_lied, args.clipgeluid
         if len(tijden) == 2:
             begin, eind = tijden
             # eind ligt vast (nooit voorbij het gekozen eind knippen); voor de beat beginnen we iets eerder
@@ -289,7 +299,7 @@ def main():
             segment(clip, begin, eind - begin, nieuw(), zw=True, zoom=0.06, fade_in=0.4,
                     fade_out=0.8)
 
-    einde(args.eindtekst, 4.0 if args.eindtekst else 2.0, nieuw())
+    einde(args.eindtekst, args.eindduur if args.eindtekst else 2.0, nieuw(args.eindvolume))
 
     lijst = TMP / "lijst.txt"
     lijst.write_text("".join(f"file '{s.name}'\n" for s in stukken))
@@ -324,7 +334,7 @@ def main():
         lied = ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
     af = (f"[1:a]aresample=44100,aformat=channel_layouts=stereo,apad,"
           f"volume=eval=frame:volume='{vol_expr}',"
-          f"afade=t=in:d=0.3,afade=t=out:st={max(0, totaal - 4):.2f}:d=4[m];"
+          f"afade=t=in:d=0.3,afade=t=out:st={max(0, totaal - args.uitfaden):.2f}:d={args.uitfaden}[m];"
           f"[2:a]aresample=44100,aformat=channel_layouts=stereo,apad[c];"
           f"[m][c]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.95[a]")
     run(["ffmpeg", "-y", "-i", str(beeld), *lied, "-i", str(clipgeluid),
