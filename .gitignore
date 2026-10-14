@@ -5,3 +5,4 @@ muziek/*.*
 !muziek/.gitkeep
 pangi_edit.mp4
 clips/**/*.wav
+__pycache__/
