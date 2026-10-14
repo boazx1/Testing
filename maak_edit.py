@@ -69,6 +69,11 @@ def bestanden(map_, ext):
     return sorted(f for f in p.iterdir() if f.suffix.lower() in ext) if p.exists() else []
 
 
+def tijden_uit(clip):
+    """Leest tijden uit een bestandsnaam als "naam@12-21.5-28.mp4"."""
+    return [float(x) for x in clip.stem.split("@", 1)[1].split("-")] if "@" in clip.stem else []
+
+
 def segment(bron, start, lengte, uit, zw=False, traag=1.0, zoom=0.0, flits=False,
             fade_in=0.0, fade_out=0.0):
     """Knipt een stuk uit een clip: verticaal met wazige achtergrond, zonder geluid."""
@@ -146,7 +151,7 @@ def main():
     # vanaf 21.5 s (het moment van de dood) vertraagd en zwart-wit, tot 28 s.
     # Zonder tijden: eerste 12 s, helemaal zwart-wit en vertraagd.
     for clip in dood:
-        tijden = [float(x) for x in clip.stem.split("@", 1)[1].split("-")] if "@" in clip.stem else []
+        tijden = tijden_uit(clip)
         if len(tijden) == 3:
             begin, moment, eind = tijden
             segment(clip, begin, moment - begin, nieuw(), zoom=0.1, fade_in=0.5)
@@ -157,10 +162,12 @@ def main():
             segment(clip, begin, (eind - begin) / 0.7, nieuw(), zw=True, traag=0.7,
                     zoom=0.12, fade_in=0.8)
 
-    # Rouw: zwart-wit, max 8 s per clip, zachte overgangen
+    # Rouw: zwart-wit, zachte overgangen. "naam@15-38.mp4" = stuk van 15 tot 38 s,
+    # zonder tijden de eerste 8 s.
     for clip in rouw:
-        d = min(duur(clip), 8.0)
-        segment(clip, 0, d, nieuw(), zw=True, zoom=0.06, fade_in=0.4, fade_out=0.4)
+        tijden = tijden_uit(clip)
+        begin, eind = tijden if len(tijden) == 2 else (0.0, min(duur(clip), 8.0))
+        segment(clip, begin, eind - begin, nieuw(), zw=True, zoom=0.06, fade_in=0.4, fade_out=0.8)
 
     einde(args.eindtekst, 4.0 if args.eindtekst else 2.0, nieuw())
 
