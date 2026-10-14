@@ -220,7 +220,7 @@ def main():
         d = duur(clip)
         tijden = tijden_uit(clip)
         luid = "_luid" in clip.stem
-        lied_vol, clip_vol = (0.2, args.clipgeluid * 1.6) if luid else (leuk_lied, args.clipgeluid)
+        lied_vol, clip_vol = (0.2, args.clipgeluid * 1.1) if luid else (leuk_lied, args.clipgeluid)
         if len(tijden) == 2:
             begin, eind = tijden
             # eind ligt vast (nooit voorbij het gekozen eind knippen); voor de beat beginnen we iets eerder
