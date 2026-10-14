@@ -27,6 +27,7 @@ import numpy as np
 
 W, H, FPS = 1080, 1920, 30
 FONT = "/usr/share/fonts/opentype/inter/Inter-Light.otf"
+ONDERTITEL_FONT = "/usr/share/fonts/opentype/inter/Inter-Black.otf"
 ROOT = Path(__file__).resolve().parent
 TMP = ROOT / "tmp_edit"
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
@@ -96,6 +97,43 @@ def geluid_stuk(bron, start, lengte, uit, volume=0.0):
     run([*cmd, "-c:a", "pcm_s16le", str(uit)])
 
 
+def lees_srt(pad):
+    """Leest een .srt-bestand: [(begin, eind, tekst), ...] in seconden van de clip."""
+    def sec(t):
+        u, m, rest = t.strip().replace(",", ".").split(":")
+        return int(u) * 3600 + int(m) * 60 + float(rest)
+    cues = []
+    for blok in pad.read_text(encoding="utf-8").strip().split("\n\n"):
+        regels = [r for r in blok.strip().splitlines() if r.strip()]
+        tijd = next((i for i, r in enumerate(regels) if "-->" in r), None)
+        if tijd is None:
+            continue
+        a, b = regels[tijd].split("-->")
+        cues.append((sec(a), sec(b), " ".join(regels[tijd + 1:]).strip()))
+    return cues
+
+
+def ondertitel_filters(bron, start, lengte, traag, uit):
+    """TikTok-ondertitels uit "<clip>.srt" (als dat bestaat), onder het filmpje in beeld."""
+    srt = bron.with_name(bron.stem + ".srt")
+    if not srt.exists():
+        return ""
+    filters = []
+    for i, (a, b, tekst) in enumerate(lees_srt(srt)):
+        a, b = (a - start) / traag, (b - start) / traag
+        if b <= 0 or a >= lengte or not tekst:
+            continue
+        a, b = max(0.0, a), min(lengte, b)
+        tf = uit.with_name(f"{uit.stem}_tekst{i}.txt")
+        tf.write_text(tekst, encoding="utf-8")
+        filters.append(
+            f"drawtext=fontfile={ONDERTITEL_FONT}:textfile={tf}:fontsize=78:fontcolor=white:"
+            f"borderw=7:bordercolor=black@0.9:shadowcolor=black@0.5:shadowx=4:shadowy=4:"
+            f"x=(w-text_w)/2:y=h*0.70:enable='between(t,{a:.3f},{b:.3f})':"
+            f"alpha='min(1,(t-{a:.3f})/0.08)'")
+    return "," + ",".join(filters) if filters else ""
+
+
 def segment(bron, start, lengte, uit, zw=False, traag=1.0, zoom=0.0, flits=False,
             fade_in=0.0, fade_out=0.0, volume=0.0, audio_bron=None):
     """Knipt een stuk uit een clip: verticaal met wazige achtergrond.
@@ -109,6 +147,7 @@ def segment(bron, start, lengte, uit, zw=False, traag=1.0, zoom=0.0, flits=False
     bg = f"scale=-2:{H},crop={W}:{H},boxblur=25:2{kleur},eq=brightness=-0.15"
     vf = (f"[0:v]setpts={1 / traag}*(PTS-STARTPTS),fps={FPS},split[a][b];[a]{bg}[bg];[b]{fg}[fg];"
           f"[bg][fg]overlay=(W-w)/2:(H-h)/2,vignette=PI/5")
+    vf += ondertitel_filters(bron, start, lengte, traag, uit)
     if flits:
         vf += ",fade=t=in:d=0.12:color=white"
     if fade_in:

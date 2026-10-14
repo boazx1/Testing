@@ -6,3 +6,4 @@ muziek/*.*
 pangi_edit.mp4
 clips/**/*.wav
 __pycache__/
+clips/**/*.srt
