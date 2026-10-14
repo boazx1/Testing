@@ -137,9 +137,16 @@ def main():
         stukken.append(p)
         return p
 
-    # Leuke clips: kort en snel, max 2 stukken per clip, wit flitsje op elke knip
+    # Leuke clips: kort en snel, max 2 stukken per clip, wit flitsje op elke knip.
+    # "naam@23-30.5.mp4" = precies dat stuk (lengte afgerond op de beat).
     for n, clip in enumerate(leuk):
         d = duur(clip)
+        tijden = tijden_uit(clip)
+        if len(tijden) == 2:
+            begin, eind = tijden
+            lengte = max(tik, round((eind - begin) / tik) * tik)
+            segment(clip, begin, min(lengte, d - begin), nieuw(), zoom=0.08, flits=True)
+            continue
         lengte = tik * (4 if n % 3 == 0 else 2)
         while lengte > d and lengte > tik:
             lengte -= tik
