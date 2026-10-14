@@ -142,10 +142,20 @@ def main():
         for s in starts:
             segment(clip, s, min(lengte, d - s), nieuw(), zoom=0.08, flits=True)
 
-    # Dood: zwart-wit, vertraagd, langzaam in beeld vanuit zwart
+    # Dood. Tijden in de bestandsnaam: "naam@12-21.5-28.mp4" = vanaf 12 s in kleur,
+    # vanaf 21.5 s (het moment van de dood) vertraagd en zwart-wit, tot 28 s.
+    # Zonder tijden: eerste 12 s, helemaal zwart-wit en vertraagd.
     for clip in dood:
-        d = min(duur(clip), 12.0)
-        segment(clip, 0, d / 0.7, nieuw(), zw=True, traag=0.7, zoom=0.12, fade_in=0.8)
+        tijden = [float(x) for x in clip.stem.split("@", 1)[1].split("-")] if "@" in clip.stem else []
+        if len(tijden) == 3:
+            begin, moment, eind = tijden
+            segment(clip, begin, moment - begin, nieuw(), zoom=0.1, fade_in=0.5)
+            segment(clip, moment, (eind - moment) / 0.5, nieuw(), zw=True, traag=0.5,
+                    zoom=0.15, flits=True, fade_out=1.0)
+        else:
+            begin, eind = tijden if len(tijden) == 2 else (0.0, min(duur(clip), 12.0))
+            segment(clip, begin, (eind - begin) / 0.7, nieuw(), zw=True, traag=0.7,
+                    zoom=0.12, fade_in=0.8)
 
     # Rouw: zwart-wit, max 8 s per clip, zachte overgangen
     for clip in rouw:

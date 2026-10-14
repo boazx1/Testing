@@ -1,1 +1,6 @@
 tmp_edit/
+clips/**/*.mp4
+clips/**/*.mov
+muziek/*.*
+!muziek/.gitkeep
+pangi_edit.mp4
