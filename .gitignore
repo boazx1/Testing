@@ -4,3 +4,4 @@ clips/**/*.mov
 muziek/*.*
 !muziek/.gitkeep
 pangi_edit.mp4
+clips/**/*.wav
