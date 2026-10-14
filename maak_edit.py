@@ -83,6 +83,21 @@ def heeft_audio(pad):
     return bool(out.stdout.strip())
 
 
+def spraak_volume(bron, start, lengte, doel=-11.0):
+    """Versterking waarmee de spraak in dit stuk ongeveer `doel` dB wordt (max 8x)."""
+    sr = 16000
+    pcm = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{lengte:.3f}",
+                          "-i", str(bron), "-vn", "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"],
+                         check=True, capture_output=True).stdout
+    x = np.frombuffer(pcm, dtype=np.float32)
+    blok = x[: len(x) // 800 * 800].reshape(-1, 800)
+    db = 20 * np.log10(np.sqrt((blok ** 2).mean(axis=1)) + 1e-9)
+    spraak = db[db > -35]
+    if len(spraak) < 10:
+        return 1.0
+    return float(min(8.0, 10 ** ((doel - np.median(spraak)) / 20)))
+
+
 def geluid_stuk(bron, start, lengte, uit, volume=0.0):
     """Schrijft het geluid van een stuk als .wav (stilte als volume 0 is), precies `lengte` lang."""
     stil = ["-f", "lavfi", "-t", f"{lengte:.3f}", "-i", "anullsrc=r=44100:cl=stereo"]
@@ -142,9 +157,13 @@ def segment(bron, start, lengte, uit, zw=False, traag=1.0, zoom=0.0, flits=False
     kleur = ",hue=s=0,eq=contrast=1.12:brightness=-0.03" if zw else ",eq=saturation=1.15:contrast=1.05"
     # langzame zoom-in over de hele lengte van het stuk
     z = f"(1+{zoom}*t/{lengte:.3f})"
-    fg = (f"scale={W}:-2,setsar=1,scale=w='trunc({W}*{z}/2)*2':h=-2:eval=frame,"
-          f"crop=w={W}:h='min(ih,{W}*9/16)':x='(iw-ow)/2':y='(ih-oh)/2'{kleur}")
-    bg = f"scale=-2:{H},crop={W}:{H},boxblur=25:2{kleur},eq=brightness=-0.15"
+    # met eigen ondertitels: onderste 12% (ingebakken ondertitels + hotbar) wegsnijden
+    eigen_tekst = bron.with_name(bron.stem + ".srt").exists()
+    hoogte = int(W * 9 / 16 * (0.88 if eigen_tekst else 1)) // 2 * 2
+    bijsnijden = f",crop=iw:trunc(ih*0.88/2)*2:0:0" if eigen_tekst else ""
+    fg = (f"scale={W}:-2,setsar=1{bijsnijden},scale=w='trunc({W}*{z}/2)*2':h=-2:eval=frame,"
+          f"crop=w={W}:h='min(ih,{hoogte})':x='(iw-ow)/2':y='(ih-oh)/2'{kleur}")
+    bg = f"{bijsnijden[1:] + ',' if bijsnijden else ''}scale=-2:{H},crop={W}:{H},boxblur=25:2{kleur},eq=brightness=-0.15"
     vf = (f"[0:v]setpts={1 / traag}*(PTS-STARTPTS),fps={FPS},split[a][b];[a]{bg}[bg];[b]{fg}[fg];"
           f"[bg][fg]overlay=(W-w)/2:(H-h)/2,vignette=PI/5")
     vf += ondertitel_filters(bron, start, lengte, traag, uit)
@@ -255,14 +274,17 @@ def main():
 
     # Rouw: zwart-wit, zachte overgangen. "naam@15-38.mp4" = stuk van 15 tot 38 s,
     # zonder tijden de eerste 8 s. Ligt er een "<naam>.stem.wav" naast (alleen de stem,
-    # zonder muziek), dan is die stem goed te horen en gaat het liedje zachter.
+    # zonder muziek), of staat "_geluid" in de naam (clip heeft al alleen stemmen), dan is
+    # de stem goed te horen (automatisch even hard gemaakt) en gaat het liedje zachter.
     for clip in rouw:
         tijden = tijden_uit(clip)
         begin, eind = tijden if len(tijden) == 2 else (0.0, min(duur(clip), 8.0))
         stem = clip.with_name(clip.stem + ".stem.wav")
-        if stem.exists():
+        geluid = stem if stem.exists() else clip if "_geluid" in clip.stem else None
+        if geluid:
             segment(clip, begin, eind - begin, nieuw(0.25), zw=True, zoom=0.06, fade_in=0.4,
-                    fade_out=0.8, volume=2.0, audio_bron=stem)
+                    fade_out=0.8, volume=spraak_volume(geluid, begin, eind - begin),
+                    audio_bron=geluid)
         else:
             segment(clip, begin, eind - begin, nieuw(), zw=True, zoom=0.06, fade_in=0.4,
                     fade_out=0.8)
