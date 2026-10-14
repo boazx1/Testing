@@ -14,6 +14,7 @@ Gebruik:
   python3 maak_edit.py                       # met liedje uit muziek/
   python3 maak_edit.py --bpm 80              # zonder liedje, knippen op 80 BPM
   python3 maak_edit.py --eindtekst ""        # helemaal geen tekst
+  python3 maak_edit.py --piek 99.25          # drop van het liedje op de dood laten vallen
 """
 import argparse
 import json
@@ -43,11 +44,11 @@ def duur(pad):
     return float(json.loads(out)["format"]["duration"])
 
 
-def beat_lengte(liedje):
+def beat_lengte(liedje, vanaf=0.0):
     """Schat de tijd tussen twee beats (s) uit de energie van het liedje."""
     sr = 11025
     pcm = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(liedje), "-t", "90", "-ac", "1", "-ar", str(sr),
+        ["ffmpeg", "-v", "error", "-ss", f"{vanaf:.2f}", "-i", str(liedje), "-t", "90", "-ac", "1", "-ar", str(sr),
          "-f", "f32le", "-"], check=True, capture_output=True).stdout
     x = np.frombuffer(pcm, dtype=np.float32)
     hop = 256
@@ -111,6 +112,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bpm", type=float, help="tempo als er geen liedje in muziek/ staat")
     ap.add_argument("--eindtekst", default="rust zacht Pangi", help='"" = geen tekst')
+    ap.add_argument("--piek", type=float,
+                    help="tijd (s) in het liedje die precies op het moment van de dood moet vallen")
     args = ap.parse_args()
 
     liedjes = bestanden("muziek", AUDIO_EXT)
@@ -121,7 +124,7 @@ def main():
         sys.exit("Zet clips in clips/1_leuk, clips/2_dood en/of clips/3_rouw")
     liedje = liedjes[0] if liedjes else None
     if liedje:
-        beat = beat_lengte(liedje)
+        beat = beat_lengte(liedje, max(0.0, (args.piek or 0) - 60))
         print(f"Liedje: {liedje.name}  (~{60 / beat:.0f} BPM)")
     else:
         beat = 60 / (args.bpm or 80)
@@ -131,6 +134,7 @@ def main():
 
     TMP.mkdir(exist_ok=True)
     stukken = []
+    dood_moment = None
 
     def nieuw():
         p = TMP / f"{len(stukken) + 1:03d}.mp4"
@@ -162,6 +166,7 @@ def main():
         if len(tijden) == 3:
             begin, moment, eind = tijden
             segment(clip, begin, moment - begin, nieuw(), zoom=0.1, fade_in=0.5)
+            dood_moment = sum(duur(x) for x in stukken)
             segment(clip, moment, (eind - moment) / 0.5, nieuw(), zw=True, traag=0.5,
                     zoom=0.15, flits=True, fade_out=1.0)
         else:
@@ -188,7 +193,11 @@ def main():
     if liedje:
         if duur(liedje) < totaal:
             print("Let op: liedje is korter dan de video; het einde is stil.")
-        audio = ["-i", str(liedje), "-af",
+        lied_start = 0.0
+        if args.piek is not None and dood_moment is not None:
+            lied_start = max(0.0, args.piek - dood_moment)
+            print(f"Liedje start op {lied_start:.1f}s, piek valt op {dood_moment:.1f}s in de video")
+        audio = ["-ss", f"{lied_start:.3f}", "-i", str(liedje), "-af",
                  f"afade=t=in:d=0.3,afade=t=out:st={max(0, totaal - 4):.2f}:d=4,apad"]
     else:
         audio = ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
