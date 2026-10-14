@@ -18,6 +18,7 @@ Gebruik:
 """
 import argparse
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -175,23 +176,27 @@ def main():
 
     # Leuke clips: kort en snel, max 2 stukken per clip, wit flitsje op elke knip.
     # "naam@23-30.5.mp4" = precies dat stuk (lengte afgerond op de beat).
+    # "_luid" in de naam = eigen geluid harder en liedje zachter (voor een moment dat je moet horen).
     for n, clip in enumerate(leuk):
         d = duur(clip)
         tijden = tijden_uit(clip)
+        luid = "_luid" in clip.stem
+        lied_vol, clip_vol = (0.2, args.clipgeluid * 1.6) if luid else (leuk_lied, args.clipgeluid)
         if len(tijden) == 2:
             begin, eind = tijden
-            # afronden naar beneden, zodat we nooit voorbij het gekozen eind knippen
-            lengte = max(tik, int((eind - begin) / tik) * tik)
-            segment(clip, begin, min(lengte, d - begin), nieuw(leuk_lied), zoom=0.08, flits=True,
-                    volume=args.clipgeluid)
+            # eind ligt vast (nooit voorbij het gekozen eind knippen); voor de beat beginnen we iets eerder
+            lengte = max(tik, math.ceil((eind - begin) / tik - 0.01) * tik)
+            begin = max(0.0, eind - lengte)
+            segment(clip, begin, min(lengte, d - begin), nieuw(lied_vol), zoom=0.08, flits=True,
+                    volume=clip_vol)
             continue
         lengte = tik * (4 if n % 3 == 0 else 2)
         while lengte > d and lengte > tik:
             lengte -= tik
         starts = [0.0] if d < lengte * 3 else [d * 0.2, d * 0.6]
         for s in starts:
-            segment(clip, s, min(lengte, d - s), nieuw(leuk_lied), zoom=0.08, flits=True,
-                    volume=args.clipgeluid)
+            segment(clip, s, min(lengte, d - s), nieuw(lied_vol), zoom=0.08, flits=True,
+                    volume=clip_vol)
 
     # Dood. Tijden in de bestandsnaam: "naam@12-21.5-28.mp4" = vanaf 12 s in kleur,
     # vanaf 21.5 s (het moment van de dood) vertraagd en zwart-wit, tot 28 s.
